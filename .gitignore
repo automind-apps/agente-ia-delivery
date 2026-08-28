@@ -1,0 +1,8 @@
+node_modules
+.env
+auth
+*.log
+dados.db
+dados.db-*
+dados.test.db
+dados.test.db-*

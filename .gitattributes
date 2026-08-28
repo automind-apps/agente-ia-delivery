@@ -1,0 +1,10 @@
+# Por padrao, deixa o Git normalizar texto automaticamente
+* text=auto
+
+# Scripts shell DEVEM ser sempre LF (rodam no servidor Linux)
+*.sh text eol=lf
+
+# Esses tambem ficam melhor como LF
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
