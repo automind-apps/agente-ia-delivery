@@ -6,5 +6,5 @@ set -e
 git pull
 npm install
 npm test
-pm2 restart corretor-ia
+pm2 restart delivery-ia
 echo "==> Atualizado, testado e reiniciado."

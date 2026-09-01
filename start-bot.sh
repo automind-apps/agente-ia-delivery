@@ -17,8 +17,8 @@ if [ ! -d "auth" ] || [ -z "$(ls -A auth 2>/dev/null)" ]; then
 fi
 
 echo "==> Colocando o bot sob o PM2 (24/7)..."
-pm2 delete corretor-ia >/dev/null 2>&1 || true
-pm2 start src/index.js --name corretor-ia
+pm2 delete delivery-ia >/dev/null 2>&1 || true
+pm2 start src/index.js --name delivery-ia
 pm2 save
 pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || pm2 startup || true
 pm2 save
@@ -27,6 +27,6 @@ echo ""
 echo "============================================================"
 echo " Bot rodando 24/7! Pode fechar o terminal e desligar o PC."
 echo "   pm2 status              -> ver se esta no ar"
-echo "   pm2 logs corretor-ia    -> ver conversas/erros"
-echo "   pm2 restart corretor-ia -> reiniciar (apos mudar config)"
+echo "   pm2 logs delivery-ia    -> ver conversas/erros"
+echo "   pm2 restart delivery-ia -> reiniciar (apos mudar config)"
 echo "============================================================"

@@ -1,7 +1,7 @@
 {
-  "name": "corretor-ia",
+  "name": "agente-ia-delivery",
   "version": "1.0.0",
-  "description": "Atendente virtual de IA para imobiliarias/corretores via WhatsApp",
+  "description": "Atendente virtual de IA para lanchonetes/pizzarias/restaurantes via WhatsApp",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",

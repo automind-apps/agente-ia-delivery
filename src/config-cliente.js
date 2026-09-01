@@ -1,113 +1,94 @@
 // src/config-cliente.js
 // ==========================================================================
-// ESTE E O ARQUIVO QUE VOCE PERSONALIZA PARA CADA CLIENTE.
-// Tudo aqui vira o "conhecimento" do atendente. Quanto melhor preenchido,
-// melhor ele atende. Os textos abaixo sao GENERICOS - troque pelos dados
-// reais da imobiliaria quando fechar o cliente.
+// ESTE E O ARQUIVO QUE VOCE PERSONALIZA PARA CADA CLIENTE (LANCHONETE/
+// PIZZARIA/HAMBURGUERIA/RESTAURANTE). Tudo aqui vira o "conhecimento" do
+// atendente. Quanto melhor preenchido, melhor ele atende. Os textos abaixo
+// sao GENERICOS - troque pelos dados reais do estabelecimento quando fechar
+// o cliente.
 // ==========================================================================
 
 export const CLIENTE = {
   // ---- Identidade ----
-  nomeImobiliaria: 'Remax Horizonte',
-  cidade: 'São João da Boa Vista',
-  bairros: 'Recanto do Lago e Terras de São José, Recanto dos Passaros',
-  tipos: 'casas e apartamentos',
-  horarioAtendimentoHumano: 'segunda a sexta, 9h as 18h, e sabado 9h as 13h',
+  nomeEstabelecimento: 'Lanchonete do Joao',
+  tipoEstabelecimento: 'lanchonete', // lanchonete | pizzaria | hamburgueria | restaurante | marmita
+  cidade: 'Araras',
+  bairro: 'Centro',
 
-  // ---- Politicas da empresa (o que o atendente PODE afirmar) ----
-  // Escreva como regras curtas e verdadeiras. Se nao souber, deixe vazio
-  // que o atendente vai dizer que confirma com o corretor.
-  politicas: [
-    'A imobiliaria trabalha com compra, venda e locacao de imoveis.',
-    'As visitas sao agendadas com um corretor e acompanhadas por ele.',
-    'A documentacao e analise de credito sao orientadas pelo corretor responsavel.',
-    'Nao cobramos taxa para o interessado apenas visitar um imovel.',
+  // ---- Horario de funcionamento ----
+  // Chaves: segunda, terca, quarta, quinta, sexta, sabado, domingo.
+  // Formato "HH:MM". Se um dia nao abre, use fechado: true.
+  // Se abrir e fechar no mesmo dia (o padrao), so preencher abre/fecha.
+  // Para virar madrugada (ex.: 18:00 -> 02:00 do dia seguinte), coloque
+  // fecha maior que 24 (ex.: "26:00") OU fecha menor que abre - o codigo
+  // interpreta isso como "vira o dia".
+  horarioFuncionamento: {
+    segunda: { abre: '18:00', fecha: '23:00' },
+    terca: { abre: '18:00', fecha: '23:00' },
+    quarta: { abre: '18:00', fecha: '23:00' },
+    quinta: { abre: '18:00', fecha: '23:00' },
+    sexta: { abre: '18:00', fecha: '00:00' },
+    sabado: { abre: '18:00', fecha: '00:00' },
+    domingo: { abre: '18:00', fecha: '23:00' },
+  },
+
+  // ---- Entrega ----
+  // bairrosAtendidos: lista de bairros que o estabelecimento entrega.
+  // Comparacao e case-insensitive e ignora acentos.
+  bairrosAtendidos: ['Centro', 'Vila Nova', 'Jardim Europa'],
+  taxaEntregaPadrao: 5.0, // R$ (adicionado a todo pedido)
+  tempoMedioEntrega: '40-60 minutos',
+  valorMinimoPedido: 20.0, // R$ (0 se nao tiver minimo)
+
+  // ---- Cardapio ----
+  // Estrutura: array de categorias, cada categoria tem itens { nome, descricao, preco }.
+  // O NOME e o identificador - deve ser unico dentro do cardapio inteiro (o codigo
+  // usa nome para casar o item do pedido e pegar o preco - modelo NAO calcula preco).
+  // Se um item estiver esgotado, marque disponivel: false (padrao true).
+  cardapio: [
+    {
+      categoria: 'Hamburgueres',
+      itens: [
+        { nome: 'X-Burguer', descricao: 'Pao, carne, queijo, alface, tomate', preco: 18.0 },
+        { nome: 'X-Bacon', descricao: 'Pao, carne, queijo, bacon, alface, tomate', preco: 22.0 },
+        { nome: 'X-Tudo', descricao: 'Pao, 2 carnes, queijo, bacon, ovo, alface, tomate', preco: 28.0 },
+      ],
+    },
+    {
+      categoria: 'Porcoes',
+      itens: [
+        { nome: 'Batata frita M', descricao: '300g', preco: 15.0 },
+        { nome: 'Batata frita G', descricao: '500g', preco: 22.0 },
+      ],
+    },
+    {
+      categoria: 'Bebidas',
+      itens: [
+        { nome: 'Coca-Cola lata', descricao: '350ml', preco: 6.0 },
+        { nome: 'Guarana lata', descricao: '350ml', preco: 6.0 },
+        { nome: 'Agua sem gas', descricao: '500ml', preco: 4.0 },
+      ],
+    },
   ],
 
-  // ---- FAQ: perguntas frequentes e como responder ----
-  // O atendente usa isto para responder sozinho as duvidas comuns.
-  faq: [
-    {
-      pergunta: 'Quais documentos preciso para alugar?',
-      resposta:
-        'Em geral pedimos documento com foto, CPF, comprovante de renda e de residencia. O corretor confirma a lista completa conforme o imovel.',
-    },
-    {
-      pergunta: 'Posso financiar a compra?',
-      resposta:
-        'Sim, trabalhamos com imoveis que aceitam financiamento. O corretor te orienta sobre simulacao e aprovacao de credito.',
-    },
-    {
-      pergunta: 'Aceita pet?',
-      resposta:
-        'Depende do imovel e das regras do condominio. Posso anotar isso e o corretor confirma para o imovel do seu interesse.',
-    },
-    {
-      pergunta: 'Tem taxa para visitar?',
-      resposta: 'Nao. A visita acompanhada pelo corretor nao tem custo para voce.',
-    },
+  // ---- Pagamento ----
+  formasPagamento: ['Dinheiro', 'Cartao na entrega (debito/credito)', 'PIX'],
+  chavePix: '19999999999', // chave PIX - so informar quando o cliente escolher PIX
+  aceitaVoucher: false, // vale-refeicao etc.
+
+  // ---- Regras / observacoes especiais que o atendente pode citar ----
+  observacoesEspeciais: [
+    'Nao fazemos entrega para bairros fora da lista.',
+    'Pedidos depois das 22h30 podem ter tempo maior de entrega.',
   ],
 
-  // ---- Limites: o que o atendente NUNCA deve fazer ----
-  naoFaca: [
-    'Informar precos, metragens ou disponibilidade de imoveis que NAO estejam na lista IMOVEIS abaixo (nao tem acesso a isso).',
-    'Prometer aprovacao de financiamento ou condicoes de pagamento.',
-    'Dar parecer juridico ou garantir prazos de contrato.',
-    'Inventar imoveis ou caracteristicas.',
-  ],
-
-  // ---- Donos / responsaveis que podem ATUALIZAR a disponibilidade pelo WhatsApp ----
-  // SO DIGITOS, com DDI+DDD, igual ao CORRETOR_WHATSAPP do .env. Ex.: '5511999998888'.
-  // Mensagem vinda de QUALQUER numero desta lista entra em "modo dono" (atualiza
-  // estoque) em vez de ser atendida como lead. O reconhecimento e feito EM CODIGO
-  // pelo numero - NUNCA por alguem dizer "sou o dono" na conversa.
-  // Deixe a lista vazia ([]) se ninguem for atualizar estoque por chat.
+  // ---- Donos / responsaveis que RECEBEM as notificacoes de pedido ----
+  // SO DIGITOS, com DDI+DDD. Ex.: '5519999998888'. O PRIMEIRO da lista e para
+  // onde vai o resumo do pedido pelo WhatsApp (index.js). Se voce quiser um
+  // canal separado (grupo, outro numero), use DONO_WHATSAPP no .env - o env
+  // sobrepoe esta lista.
+  // Mensagens vindas destes numeros SAO IGNORADAS pelo bot (evita loop e
+  // conversa acidental com o dono).
   donosWhatsApp: [
-    '19997028037',
-  ],
-
-  // ---- IMOVEIS (descricao ESTATICA; a disponibilidade vive no banco) ----
-  // Cada imovel tem um ID curto e ESTAVEL (ex.: 'IMOVEL 02') que tanto o lead quanto
-  // o dono usam para apontar sem ambiguidade. Aqui fica so o que quase nunca muda
-  // (tipo, local, valor, regras). O campo "Status:" (disponivel/indisponivel) NAO
-  // mora aqui - ele e lido do banco a cada mensagem e pode ser mudado pelo dono.
-  // Deixe a lista vazia ([]) para o atendente voltar a so coletar leads (sem estoque).
-  imoveis: [
-    {
-      id: '1',
-      tipo: 'Casa',
-      local: 'Rua Colibri, 119, Jardim Recanto dos Pássaros, São João da Boa Vista, São Paulo, 13873504',
-      valor: '639000 + IPTU de 1208,52',
-      dormitorios: '3',
-      suites: '1',
-      banheiros: '3',
-      tamanho: '182 m2',
-      detalhes: 'garagem para 2 carros e area gourmet',
-      link: 'https://www.remax.com.br/pt-br/imoveis/casa/venda/sao-joao-da-boa-vista/119-rua-colibri/780291010-30',
-    },
-    {
-      id: '2',
-      tipo: 'Apartamento',
-      local: 'Rua Haig Mousessian, 37 - Lago do Recanto do Lago - Recanto do Lago, São João da Boa Vista, São Paulo, 13874658',
-      valor: '1600000 + condominio 853 mensal',
-      dormitorios: '3',
-      suites: '3',
-      banheiros: '5',
-      tamanho: '157 m2',
-      detalhes: 'estacionamento com 2 vagas',
-      link: 'https://www.remax.com.br/pt-br/imoveis/apartamento/venda/sao-joao-da-boa-vista/37-rua-haig-mousessian-lago-do-recanto-do-lago/780291010-33',
-    },
-    {
-      id: '3',
-      tipo: 'Casa',
-      local: 'Rua José Carlos Campos, 156, Recanto do Lago, São João da Boa Vista, São Paulo, 13874665',
-      valor: '647000 + IPTU de 1211',
-      dormitorios: '4',
-      suites: '1',
-      banheiros: '3',
-      tamanho: '192 m2',
-      detalhes: '',
-      link: 'https://www.remax.com.br/pt-br/imoveis/casa/venda/sao-joao-da-boa-vista/156-rua-jose-carlos-campos/780291010-34',
-    },
+    '5519999998888',
   ],
 };

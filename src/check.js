@@ -9,7 +9,6 @@ if (!k) {
   console.log('ANTHROPIC_API_KEY: NAO ENCONTRADA ❌');
   console.log('Confira se o arquivo se chama exatamente ".env" e esta na raiz do projeto.');
 } else {
-  // Mostra so o comeco e o fim, nunca a chave inteira.
   const ini = k.slice(0, 7);
   const fim = k.slice(-4);
   console.log(`ANTHROPIC_API_KEY: encontrada ✅  (${ini}...${fim}, ${k.length} caracteres)`);
@@ -17,5 +16,15 @@ if (!k) {
     console.log('AVISO: a chave normalmente comeca com "sk-ant-". Confira se colou certo.');
   }
 }
+
+const dono = process.env.DONO_WHATSAPP;
+if (dono) {
+  const so = String(dono).replace(/\D/g, '');
+  console.log(`DONO_WHATSAPP: ${so} (recebe as notificacoes de pedido)`);
+} else {
+  console.log('DONO_WHATSAPP: (nao definido) - pedidos so no terminal. Use o config-cliente.js ou defina no .env.');
+}
+
 console.log('MOCK:', process.env.MOCK || '(nao definido = usa API real)');
+console.log('PAUSA_HANDOFF_HORAS:', process.env.PAUSA_HANDOFF_HORAS || '(padrao: 4)');
 console.log('---------------------------\n');

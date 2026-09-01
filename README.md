@@ -1,8 +1,9 @@
-# Corretor IA - atendente de WhatsApp para imobiliarias
+# Agente IA Delivery - atendente de WhatsApp para lanchonetes/pizzarias/restaurantes
 
-Atende leads no WhatsApp 24/7: acolhe, tira duvidas, **qualifica**, **avisa o corretor**
-com um resumo, e agora **gerencia o estoque de imoveis** (dono atualiza a disponibilidade
-pelo proprio chat, cliente ve so os disponiveis).
+Atende clientes no WhatsApp 24/7: acolhe, passa cardapio, **anota o pedido**,
+valida area de entrega e horario, confirma tudo com o cliente, e **avisa o dono**
+com o resumo estruturado do pedido. Se o pedido virar complexo, **passa pra
+atendimento humano** e pausa o bot na conversa.
 
 Guarda tudo em SQLite local: retoma a conversa de onde parou, mesmo apos reiniciar.
 
@@ -12,7 +13,7 @@ Guarda tudo em SQLite local: retoma a conversa de onde parou, mesmo apos reinici
 
 **Transporte** (Baileys/WhatsApp) -> **Nucleo** (regras) -> **Cerebro** (IA + tool use)
 -> **DB** (SQLite). O modelo conversa; o **codigo decide os fatos duros**
-(disponibilidade, filtro, quem e dono, ID valido).
+(preco, subtotal, total, valida area de entrega, valida horario, valida valor minimo).
 
 Migrar transporte (API oficial) = escrever outro adaptador chamando o mesmo nucleo.
 Migrar DB (Firestore) = reescrever `src/db.js` mantendo as mesmas funcoes exportadas.
@@ -20,10 +21,10 @@ Migrar DB (Firestore) = reescrever `src/db.js` mantendo as mesmas funcoes export
 ## Estrutura do projeto
 
 ```
-corretor-ia/
+agente-ia-delivery/
 ├── package.json
 ├── .env.example         modelo -> copie para ".env"
-├── .env                 VOCE cria. Chave API + numero do corretor
+├── .env                 VOCE cria. Chave API + numero do dono
 ├── .gitignore
 ├── dados.db             criado sozinho no 1o uso (SQLite). NAO vai pro git
 ├── dados.test.db        criado pelos testes. NAO vai pro git
@@ -34,11 +35,11 @@ corretor-ia/
 ├── update-bot.sh        pull + install + restart no VPS
 ├── src/
 │   ├── index.js          ADAPTADOR Baileys (transporte). Fino: recebe/envia e chama o nucleo
-│   ├── core.js           *** NUCLEO: cache, roteamento (lead vs dono), callbacks das ferramentas
-│   ├── agent.js          cerebro: prompts + IA + tool use
-│   ├── config-cliente.js *** PERSONALIZE por cliente *** (identidade, politicas, FAQ, imoveis, donos)
+│   ├── core.js           *** NUCLEO: cache, pausa por handoff, callbacks das ferramentas
+│   ├── agent.js          cerebro: prompts + IA + tool use + calculo do pedido
+│   ├── config-cliente.js *** PERSONALIZE por cliente *** (identidade, cardapio, entrega, pagamento)
 │   ├── db.js             *** CAMADA DE DADOS (SQLite). Trocar p/ Firestore = so este arquivo
-│   ├── test.js           chat no terminal (modo lead ou "dono", sem WhatsApp)
+│   ├── test.js           chat no terminal (sem WhatsApp)
 │   └── check.js          diagnostico da chave .env
 └── test/
     └── nucleo.test.js    testes deterministicos (npm test)
@@ -52,52 +53,62 @@ corretor-ia/
 2. `npm install` (traz `better-sqlite3` e o resto).
 3. Copie `.env.example` para `.env` e preencha:
    - `ANTHROPIC_API_KEY` = sua chave da API.
-   - `CORRETOR_WHATSAPP` = numero (com DDI+DDD) que recebera os resumos de lead.
+   - `DONO_WHATSAPP` = numero (com DDI+DDD) que recebera os resumos de pedido.
 4. `npm run check` (confere o .env).
 
 ## Configuracao por cliente (`src/config-cliente.js`)
 
 E onde a personalizacao mora. Editar aqui + `git commit + git push` + no VPS
-`bash update-bot.sh` e o bot ja atende com as novas informacoes. Campos:
+`bash update-bot.sh` e o bot ja atende com o novo cardapio/regras. Campos:
 
 | Campo | Uso |
 |---|---|
-| `nomeImobiliaria`, `cidade`, `bairros`, `tipos`, `horarioAtendimentoHumano` | Identidade / regiao. Vai pro system prompt. |
-| `politicas[]` | O que o bot PODE afirmar sozinho. |
-| `naoFaca[]` | O que o bot nunca deve fazer. |
-| `faq[]` | Perguntas frequentes -> respostas prontas. |
-| `donosWhatsApp[]` | **Numeros (so digitos, DDI+DDD)** reconhecidos como DONO. Podem atualizar estoque pelo chat. Deixe `[]` se ninguem for. |
-| `imoveis[]` | **Catalogo do estoque**: `id`, `tipo`, `local`, `valor`, `detalhes`, `regras`. O `id` (ex.: `"IMOVEL 02"`) e o identificador estavel usado nas conversas. |
-
-O `disponivel` **nao** mora no config - vive no banco, atualizado pelo dono via chat.
+| `nomeEstabelecimento`, `tipoEstabelecimento`, `cidade`, `bairro` | Identidade. Vai pro system prompt. |
+| `horarioFuncionamento` | Por dia da semana (`{ abre: "HH:MM", fecha: "HH:MM" }`). Vira o dia se `fecha <= abre`. |
+| `bairrosAtendidos[]` | Lista dos bairros que o estabelecimento entrega (comparacao ignora acento/caixa). |
+| `taxaEntregaPadrao` | R$ somado a todo pedido. |
+| `tempoMedioEntrega` | String livre (ex.: `"40-60 minutos"`). |
+| `valorMinimoPedido` | R$. Se o SUBTOTAL for menor, `registrar_pedido` recusa. |
+| `cardapio[]` | Categorias -> itens `{ nome, descricao, preco, disponivel? }`. `nome` e o identificador (case/acento-insensitive). |
+| `formasPagamento[]`, `chavePix` | Chave PIX so e informada quando o cliente escolhe PIX. |
+| `observacoesEspeciais[]` | Bullets que o bot pode citar. |
+| `donosWhatsApp[]` | **Numeros (so digitos, DDI+DDD)**. O 1o recebe as notificacoes; o env `DONO_WHATSAPP` sobrepoe. Mensagens vindas destes numeros SAO IGNORADAS pelo bot (evita loop). |
 
 ---
 
-## Modo cliente vs modo dono
+## Fluxo do pedido
 
-Roteamento e feito **em codigo, pelo numero** de origem (jamais por alguem dizer "sou o dono").
+1. Cliente manda mensagem. O bot:
+   - Consulta cardapio (`consultar_cardapio`) se pedido.
+   - Verifica bairro (`verificar_area_entrega`) antes de aceitar endereco.
+   - Verifica horario (`verificar_horario_funcionamento`) se relevante.
+2. Coleta itens, nome, endereco, forma de pagamento (e troco se dinheiro).
+3. Confirma tudo com o cliente.
+4. Chama `registrar_pedido`. O **CODIGO** (nao o modelo) casa cada item com o
+   cardapio, pega o preco, calcula `subtotal` + `taxa` + `total`. Se algum item
+   nao existir, esta esgotado, o bairro estiver fora da area, ou o subtotal
+   estiver abaixo do minimo, a ferramenta devolve erro pro modelo ajustar.
+5. Pedido salvo no banco -> resumo enviado ao dono no WhatsApp.
 
-| | Modo cliente (lead) | Modo dono |
-|---|---|---|
-| Quem entra | Qualquer numero fora de `donosWhatsApp` | Numeros em `CLIENTE.donosWhatsApp` |
-| O que o bot faz | Qualifica, oferece imoveis DISPONIVEIS, registra lead, avisa o corretor | So ajuda a atualizar o estoque |
-| Ferramentas disponiveis (tool use) | `registrar_lead`, `listar_imoveis`, `consultar_imovel` | `listar_imoveis`, `consultar_imovel`, `atualizar_disponibilidade` |
-| Pode escrever no estoque? | **Nao** (a ferramenta nem existe pra ele) | Sim |
+**Handoff humano**: se o cliente pedir para falar com atendente OU o pedido
+virar complexo (evento, encomenda grande, duvida sobre alergia), o bot chama
+`passar_para_humano`. A conversa entra em **pausa de N horas** (`PAUSA_HANDOFF_HORAS`,
+padrao 4h): o bot fica silencioso e o dono conversa manualmente. Depois da pausa,
+o bot volta a responder automaticamente.
 
-O modelo **nao decide** disponibilidade nem existencia de imovel: **chama a ferramenta**
-que consulta o banco AGORA, e repete o resultado. Isso elimina o vies do historico
-("ah, mas antes so tinha o IMOVEL 02...") - fato duro sempre vem do codigo.
+---
 
-**Filosofia de apresentacao:** `listar_imoveis` devolve **todos** com status. O bot
-mostra os DISPONIVEIS normalmente; para os INDISPONIVEIS, frisa que estao indisponiveis
-e oferece **lista de espera** ao cliente (registra no `resumo` do lead como
-"LISTA DE ESPERA para <ID>"). Ninguem sai da conversa sem virar lead.
+## Filosofia: modelo conversa, codigo decide
 
-**Defesas em camadas contra "cliente se passar por dono"**:
-1. `ehDono(contactId)` decide em codigo pelo numero (nada de texto).
-2. `TOOLS_DONO` so vao pro modelo quando `modo === 'dono'`.
-3. Handler em `agent.js` recusa se o modo escapar.
-4. Callback em `core.js` fica `undefined` no modo lead: sem funcao pra chamar.
+O modelo NAO calcula preco, NAO decide se entrega num bairro, NAO decide se
+esta aberto, NAO decide se o subtotal atinge o minimo. Tudo isso e ferramenta
+(tool use) ou validacao pura em codigo. Vantagens:
+
+- **Sem alucinacao de preco** (bug classico do modelo somando errado).
+- **Sem oferecer pedido em bairro que nao atende** (recusa em `calcularPedido`).
+- **Sem "vou verificar" sem fim**: o safety net anti-vacuo (`pareceVacuo`) forca
+  o modelo a chamar a ferramenta na mesma turn quando ele tentar prometer
+  consultar depois.
 
 ---
 
@@ -108,19 +119,14 @@ e oferece **lista de espera** ao cliente (registra no `resumo` do lead como
 - **Cache em memoria**: enquanto a conversa esta ativa, o bot NAO le o banco a cada
   mensagem. So le UMA vez no cache miss (1a mensagem, reinicio, ou contato sumido).
 - **RESUME_WINDOW_HOURS**: ao reabrir uma conversa, se a ultima mensagem foi dentro
-  dessa janela, retoma o contexto; se foi ha mais tempo, comeca fresco (o historico
-  antigo continua salvo, so nao entra no contexto). Default: 168h (7 dias).
+  dessa janela, retoma o contexto; se foi ha mais tempo, comeca fresco. Default: 168h (7 dias).
 - **Poda LGPD**: mensagens com +30 dias sao removidas ao iniciar.
-- **Anti-spam do corretor**: leads sao salvos sempre, mas o corretor so e re-notificado
-  se nao houve lead do mesmo contato nas ultimas 12h.
-- Cada mensagem loga `[ctx] <jid> -> memoria | banco | contato novo [dono]`.
+- Cada mensagem loga `[ctx] <jid> -> memoria | banco | contato novo | pausado`.
 
 **Tabelas no `dados.db`**:
 - `mensagens` (jid, role, content, criado_em) - historico.
-- `leads` (todos os campos capturados) - registros dos leads.
-- `imoveis` (id PK, tipo, local, valor, detalhes, dormitorios, suites, banheiros,
-  tamanho, link, disponivel, atualizado_em) - catalogo + estado atual. Semeado do
-  config, atualizado pelo dono via chat.
+- `pedidos` (cliente, itens_json, subtotal, taxa, total, endereco, pagamento, status, ...) - todos os pedidos.
+- `pausas_atendimento` (jid PK, ate, motivo) - handoff humano ativo.
 
 Custo? SQLite e local, leitura em microsegundos, sem cobranca. Texto e minusculo
 (milhares de conversas = poucos MB).
@@ -132,23 +138,26 @@ Custo? SQLite e local, leitura em microsegundos, sem cobranca. Texto e minusculo
 1. `npm run check` (zero) - confere a chave.
 2. `MOCK=true npm start` (zero) - testa QR/conexao/resposta.
 3. `npm test` (zero) - roda os testes automatizados do nucleo.
-4. `MOCK=false npm run chat` (centavos) - chat no terminal como CLIENTE. Ajusta prompt
-   e testa persistencia. "sair" e rode de novo -> ele lembra da conversa.
-5. `MOCK=false npm run chat dono` (centavos) - chat no terminal como DONO
-   (usa o 1o numero de `CLIENTE.donosWhatsApp`). Testa atualizacao de estoque.
-6. `MOCK=false npm start` - teste real no WhatsApp.
+4. `MOCK=false npm run chat` (centavos) - chat no terminal. Simula 5-6 conversas:
+   - "Boa noite, qual o cardapio?"
+   - "Quero 2 X-Burguer e uma coca"
+   - "Voces entregam no Jardim Europa?"
+   - "Quero falar com um humano"
+   - "Estao abertos?" (fora do horario)
+   - Pedido completo com endereco, pagamento e confirmacao.
+5. `MOCK=false npm start` - teste real no WhatsApp.
 
 ### Testes automatizados
 
 Rodar: `npm test`. Cobrem SO o codigo deterministico (o que quebra silencioso):
-- `db.js`: persistencia de imoveis (idempotencia do seed, leitura, escrita), anti-spam de leads.
-- `core.js`: `ehDono` (seguranca), `normalizarBool`, `atualizarDisponibilidade` (fato duro end-to-end).
+- `db.js`: persistencia de pedidos e pausas.
+- `agent.js`: casamento de item por nome, validacao de bairro/horario, **calculo do pedido** (subtotal/taxa/total, recusa item inexistente, esgotado, bairro fora, minimo, quantidade invalida).
+- `core.js`: `ehDono` (seguranca contra loop com o proprio dono).
 
 **NAO testam** o modelo (nao deterministico) nem WhatsApp (I/O externo) - isso e teste manual.
 
 Isolamento: os testes usam `dados.test.db` (fora do `dados.db` real) e sao zerados a cada
-`npm test`. Regra ao adicionar codigo novo: se decide **fato duro**, escreva 2-3 testes;
-se so **conversa**, deixe pra teste manual.
+`npm test`. Regra ao adicionar codigo novo: se decide **fato duro**, escreva 2-3 testes.
 
 ---
 
@@ -157,13 +166,12 @@ se so **conversa**, deixe pra teste manual.
 | Script | Faz |
 |---|---|
 | `npm start` | Liga o atendente no WhatsApp (Ctrl+C para parar). |
-| `npm run chat` | Chat no terminal, **modo cliente** (usa o mesmo nucleo). |
-| `npm run chat dono` | Chat no terminal, **modo dono** (simula mensagem de `donosWhatsApp[0]`). |
+| `npm run chat` | Chat no terminal (usa o mesmo nucleo, sem WhatsApp). |
 | `npm run check` | Confere se o `.env` esta lido corretamente. |
 | `npm test` | Roda os testes automatizados do nucleo. |
 
-Variaveis de `.env`: `ANTHROPIC_API_KEY`, `CORRETOR_WHATSAPP`, `MOCK`,
-`RESUME_WINDOW_HOURS`, `LIMPAR_HISTORICO_ANTIGO`.
+Variaveis de `.env`: `ANTHROPIC_API_KEY`, `DONO_WHATSAPP`, `MOCK`,
+`PAUSA_HANDOFF_HORAS`, `RESUME_WINDOW_HOURS`, `LIMPAR_HISTORICO_ANTIGO`.
 
 ---
 
@@ -171,7 +179,7 @@ Variaveis de `.env`: `ANTHROPIC_API_KEY`, `CORRETOR_WHATSAPP`, `MOCK`,
 
 ```
 bash setup-vps.sh       # 1a vez: instala Node, git, PM2, deps
-nano .env               # cole ANTHROPIC_API_KEY e CORRETOR_WHATSAPP
+nano .env               # cole ANTHROPIC_API_KEY e DONO_WHATSAPP
 bash start-bot.sh       # 1a conexao (QR) + poe no PM2 24/7
 ```
 
@@ -184,20 +192,14 @@ bash update-bot.sh      # git pull + npm install + pm2 restart
 - Logica pura -> so `git pull` + restart.
 - Dependencia npm nova -> `npm install` (ja no `update-bot.sh`).
 - Variavel de `.env` nova -> editar `.env` no VPS manualmente (nao vai pro git).
-- Schema do SQLite -> ja idempotente no boot (`CREATE TABLE IF NOT EXISTS`). Nada manual.
+- Schema do SQLite -> ja idempotente no boot (`CREATE TABLE IF NOT EXISTS`).
 
 Comandos uteis do PM2:
 - `pm2 status` - ver se esta no ar.
-- `pm2 logs corretor-ia` - ver conversas/erros em tempo real.
-- `pm2 restart corretor-ia` - reiniciar (apos mudar config sem `git pull`).
+- `pm2 logs delivery-ia` - ver conversas/erros em tempo real.
+- `pm2 restart delivery-ia` - reiniciar.
 
 ---
-
-## Sobre o numero de contato do lead
-
-O numero que vem do WhatsApp (jid) as vezes nao bate (nono digito BR / IDs internos).
-Por isso o atendente PEDE o melhor numero a propria pessoa e usa esse no resumo. O
-numero de origem do WhatsApp vai junto, como referencia.
 
 ## Avisos
 
@@ -210,18 +212,13 @@ numero de origem do WhatsApp vai junto, como referencia.
 
 ## Marcos
 
-- [x] 1. MVP que responde
-- [x] 2. Notificar o corretor (tool use)
-- [x] 3. Salvar conversas + leads (SQLite) e retomar contexto
-- [x] 3b. Nucleo separado do transporte + 1 notificacao por conversa
-- [x] 3c. Campos minimos garantidos (obrigatorios no schema)
-- [x] 3d. Persistencia de leads no banco
-- [x] 3e. Deploy 24/7 em VPS com PM2
-- [x] 3f. Disponibilidade dinamica + atualizacao pelo dono via chat (tool use)
-- [x] Testes deterministicos do nucleo (`npm test`)
-- [ ] 4. Migrar para WhatsApp Cloud API (oficial) -> ver `MARCO4.md`
-- [ ] 5. Painel de leads (provavelmente Firestore)
-- [ ] 6. Consentimento LGPD no 1o contato
-- [ ] 7. Handoff humano/bot (pausar quando o corretor responde manual)
-- [ ] 8. Extensoes do nicho "donos" (filtro `buscar_unidades`, fotos, painel visual)
-      - so apos VALIDAR que o nicho paga.
+- [x] 1. MVP que responde no WhatsApp
+- [x] 2. Notificar o dono com resumo estruturado do pedido
+- [x] 3. Cardapio + validacao de area/horario/valor minimo via tool use
+- [x] 4. Registrar pedido com calculo em codigo (nunca no modelo)
+- [x] 5. Handoff humano com pausa temporaria do bot
+- [x] 6. Testes deterministicos do nucleo (`npm test`)
+- [ ] 7. Migrar para WhatsApp Cloud API (oficial) -> ver `MARCO4.md`
+- [ ] 8. Consentimento LGPD no 1o contato
+- [ ] 9. Painel de pedidos (Firestore) para o dono visualizar
+- [ ] 10. Integracao com iFood / gestao de estoque de itens (V2)
