@@ -13,6 +13,7 @@ import {
   salvarMensagem,
   salvarPedido,
   ultimaMensagemMs,
+  ultimoPedidoDoContato,
   podarMensagensAntigas,
   limparContato,
   pausarAtendimento,
@@ -96,12 +97,14 @@ export async function processarMensagem({ contactId, texto, notificarDono }) {
 
   const resposta = await gerarResposta(conv.hist, {
     onPedido: async ({ pedido }) => {
-      const id = salvarPedido(contactId, pedido);
+      const { id, criado_em } = salvarPedido(contactId, pedido);
+      console.log(`[core] pedido #${id} salvo no banco. notificarDono existe? ${typeof notificarDono === 'function'}`);
       if (typeof notificarDono === 'function') {
-        await notificarDono({ tipo: 'pedido', pedido, id, contactId });
+        await notificarDono({ tipo: 'pedido', pedido, id, criado_em, contactId });
       }
-      return id;
+      return { id, criado_em };
     },
+    onConsultarMeuPedido: () => ultimoPedidoDoContato(contactId),
     onPassarHumano: async ({ motivo }) => {
       const ate = pausarAtendimento(contactId, PAUSA_HANDOFF_HORAS, motivo);
       console.log(`[handoff] ${contactId} pausado ate ${new Date(ate).toISOString()} (motivo: ${motivo})`);

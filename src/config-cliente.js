@@ -89,6 +89,6 @@ export const CLIENTE = {
   // Mensagens vindas destes numeros SAO IGNORADAS pelo bot (evita loop e
   // conversa acidental com o dono).
   donosWhatsApp: [
-    '5519999998888',
+    '5519992974406',
   ],
 };

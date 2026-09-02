@@ -20,9 +20,14 @@ if (!k) {
 const dono = process.env.DONO_WHATSAPP;
 if (dono) {
   const so = String(dono).replace(/\D/g, '');
-  console.log(`DONO_WHATSAPP: ${so} (recebe as notificacoes de pedido)`);
+  const okBR = so.length === 12 || so.length === 13;
+  const flag = okBR ? '✅' : `❌ INVALIDO (${so.length} digitos - BR tem 12 ou 13)`;
+  console.log(`DONO_WHATSAPP: ${so} ${flag}`);
+  if (!okBR) {
+    console.log('    -> Formato correto: 55 + DDD + numero. Ex.: 5519999998888 (celular, 13 digitos)');
+  }
 } else {
-  console.log('DONO_WHATSAPP: (nao definido) - pedidos so no terminal. Use o config-cliente.js ou defina no .env.');
+  console.log('DONO_WHATSAPP: (nao definido no .env) - vai usar CLIENTE.donosWhatsApp[0] do config-cliente.js');
 }
 
 console.log('MOCK:', process.env.MOCK || '(nao definido = usa API real)');

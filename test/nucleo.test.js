@@ -42,8 +42,9 @@ const { CLIENTE } = await import('../src/config-cliente.js');
 // db.js - pedidos
 // ============================================================================
 describe('db.js - pedidos', () => {
-  test('salvarPedido insere e retorna id incremental', () => {
-    const id = db.salvarPedido('cli1@teste', {
+  test('salvarPedido insere e retorna { id, criado_em }', () => {
+    const antes = Date.now();
+    const { id, criado_em } = db.salvarPedido('cli1@teste', {
       cliente_nome: 'Fulano',
       itens: [{ nome: 'X', quantidade: 1, preco_unitario: 10, subtotal: 10 }],
       subtotal: 10,
@@ -54,20 +55,21 @@ describe('db.js - pedidos', () => {
       forma_pagamento: 'Dinheiro',
     });
     assert.ok(id > 0, 'id do pedido deve ser positivo');
+    assert.ok(criado_em >= antes, 'criado_em deve ser timestamp ms >= now anterior');
 
     const pedidos = db.listarPedidos(10);
     const p = pedidos.find((x) => x.id === id);
     assert.ok(p, 'pedido deve estar no banco');
     assert.equal(p.cliente_nome, 'Fulano');
     assert.equal(p.total, 15);
-    // itens_json e string JSON
+    assert.equal(p.criado_em, criado_em, 'criado_em no banco deve casar com o retornado');
     const itens = JSON.parse(p.itens_json);
     assert.equal(itens.length, 1);
     assert.equal(itens[0].nome, 'X');
   });
 
   test('salvarPedido persiste troco_para quando dinheiro', () => {
-    const id = db.salvarPedido('cli2@teste', {
+    const { id } = db.salvarPedido('cli2@teste', {
       cliente_nome: 'Beltrano',
       itens: [],
       subtotal: 0,
@@ -78,6 +80,47 @@ describe('db.js - pedidos', () => {
     });
     const p = db.listarPedidos(10).find((x) => x.id === id);
     assert.equal(p.troco_para, 50);
+  });
+
+  test('salvarPedido persiste previsao_entrega quando fornecida', () => {
+    const previsao = Date.now() + 60 * 60 * 1000; // +1h
+    const { id } = db.salvarPedido('cli3@teste', {
+      cliente_nome: 'Ciclano',
+      itens: [],
+      subtotal: 0,
+      taxa_entrega: 0,
+      total: 0,
+      forma_pagamento: 'PIX',
+      previsao_entrega: previsao,
+    });
+    const p = db.listarPedidos(10).find((x) => x.id === id);
+    assert.equal(p.previsao_entrega, previsao);
+  });
+
+  test('ultimoPedidoDoContato retorna o mais recente do jid', () => {
+    db.salvarPedido('multi@teste', {
+      cliente_nome: 'Primeiro',
+      itens: [],
+      subtotal: 0,
+      taxa_entrega: 0,
+      total: 0,
+      forma_pagamento: 'PIX',
+    });
+    const { id: segundoId } = db.salvarPedido('multi@teste', {
+      cliente_nome: 'Segundo',
+      itens: [],
+      subtotal: 0,
+      taxa_entrega: 0,
+      total: 0,
+      forma_pagamento: 'PIX',
+    });
+    const p = db.ultimoPedidoDoContato('multi@teste');
+    assert.equal(p.id, segundoId);
+    assert.equal(p.cliente_nome, 'Segundo');
+  });
+
+  test('ultimoPedidoDoContato retorna undefined quando nao ha pedido', () => {
+    assert.equal(db.ultimoPedidoDoContato('sempedido@teste'), undefined);
   });
 });
 
@@ -186,6 +229,42 @@ describe('agent.js - acharItemCardapio', () => {
   });
 });
 
+describe('agent.js - tempoMedioEntregaMax (parse do tempo de entrega)', () => {
+  test('pega o MAIOR numero em "40-60 minutos"', () => {
+    assert.equal(agent.tempoMedioEntregaMax('40-60 minutos'), 60);
+  });
+
+  test('funciona com um numero so ("30 min", "45 minutos")', () => {
+    assert.equal(agent.tempoMedioEntregaMax('30 min'), 30);
+    assert.equal(agent.tempoMedioEntregaMax('45 minutos'), 45);
+  });
+
+  test('converte horas para minutos ("1 hora" = 60, "2 horas" = 120)', () => {
+    assert.equal(agent.tempoMedioEntregaMax('1 hora'), 60);
+    assert.equal(agent.tempoMedioEntregaMax('2 horas'), 120);
+  });
+
+  test('fallback 60 quando nao consegue parsear', () => {
+    assert.equal(agent.tempoMedioEntregaMax('em breve'), 60);
+    assert.equal(agent.tempoMedioEntregaMax(''), 60);
+    assert.equal(agent.tempoMedioEntregaMax(null), 60);
+  });
+});
+
+describe('agent.js - formatarDataBR', () => {
+  test('formata timestamp ms como HH:MM DD/MM', () => {
+    // 2026-09-01 20:15 local
+    const d = new Date(2026, 8, 1, 20, 15).getTime();
+    assert.equal(agent.formatarDataBR(d), '20:15 01/09');
+  });
+
+  test('retorna "-" para valor vazio', () => {
+    assert.equal(agent.formatarDataBR(0), '-');
+    assert.equal(agent.formatarDataBR(null), '-');
+    assert.equal(agent.formatarDataBR(undefined), '-');
+  });
+});
+
 describe('agent.js - bairroAtendido', () => {
   test('retorna true para bairro na lista (case/acento insensitive)', () => {
     const primeiro = (CLIENTE.bairrosAtendidos || [])[0];
@@ -243,6 +322,58 @@ describe('agent.js - calcularPedido', () => {
   const primeiroItem = CLIENTE.cardapio?.[0]?.itens?.[0];
   const primeiroBairro = (CLIENTE.bairrosAtendidos || [])[0];
 
+  test('rejeita pedido sem telefone do cliente', (t) => {
+    if (!primeiroItem || !primeiroBairro) {
+      t.skip('config sem cardapio ou bairro para testar');
+      return;
+    }
+    const r = agent.calcularPedido({
+      cliente_nome: 'Teste',
+      // sem cliente_telefone
+      itens: [{ nome: primeiroItem.nome, quantidade: 1 }],
+      endereco: 'Rua X, 1',
+      bairro: primeiroBairro,
+      forma_pagamento: 'Dinheiro',
+    });
+    assert.equal(r.ok, false);
+    assert.match(r.mensagem, /telefone/i);
+  });
+
+  test('rejeita telefone muito curto (menos de 8 digitos)', (t) => {
+    if (!primeiroItem || !primeiroBairro) {
+      t.skip('config sem cardapio ou bairro para testar');
+      return;
+    }
+    const r = agent.calcularPedido({
+      cliente_nome: 'Teste',
+      cliente_telefone: '1234',
+      itens: [{ nome: primeiroItem.nome, quantidade: 1 }],
+      endereco: 'Rua X, 1',
+      bairro: primeiroBairro,
+      forma_pagamento: 'Dinheiro',
+    });
+    assert.equal(r.ok, false);
+    assert.match(r.mensagem, /telefone/i);
+  });
+
+  test('normaliza telefone (remove formatacao) e salva so digitos', (t) => {
+    if (!primeiroItem || !primeiroBairro) {
+      t.skip('config sem cardapio ou bairro para testar');
+      return;
+    }
+    const qtd = Math.ceil((CLIENTE.valorMinimoPedido || 0) / primeiroItem.preco) + 1;
+    const r = agent.calcularPedido({
+      cliente_nome: 'Teste',
+      cliente_telefone: '(19) 99999-8888',
+      itens: [{ nome: primeiroItem.nome, quantidade: qtd }],
+      endereco: 'Rua X, 1',
+      bairro: primeiroBairro,
+      forma_pagamento: 'Dinheiro',
+    });
+    assert.equal(r.ok, true, r.mensagem);
+    assert.equal(r.dados.cliente_telefone, '19999998888');
+  });
+
   test('calcula subtotal, taxa e total corretamente', (t) => {
     if (!primeiroItem || !primeiroBairro) {
       t.skip('config sem cardapio ou bairro para testar');
@@ -252,6 +383,7 @@ describe('agent.js - calcularPedido', () => {
     const qtd = Math.ceil((CLIENTE.valorMinimoPedido || 0) / primeiroItem.preco) + 1;
     const r = agent.calcularPedido({
       cliente_nome: 'Teste',
+      cliente_telefone: '5519999998888',
       itens: [{ nome: primeiroItem.nome, quantidade: qtd }],
       endereco: 'Rua X, 1',
       bairro: primeiroBairro,
@@ -262,11 +394,13 @@ describe('agent.js - calcularPedido', () => {
     assert.equal(r.dados.taxa_entrega, CLIENTE.taxaEntregaPadrao);
     assert.equal(r.dados.total, Number((r.dados.subtotal + r.dados.taxa_entrega).toFixed(2)));
     assert.equal(r.dados.itens[0].preco_unitario, primeiroItem.preco);
+    assert.ok(r.dados.previsao_entrega > Date.now(), 'previsao_entrega deve ser futura');
   });
 
   test('rejeita item que nao existe no cardapio', () => {
     const r = agent.calcularPedido({
       cliente_nome: 'Teste',
+      cliente_telefone: '5519999998888',
       itens: [{ nome: 'Item Inexistente XYZ', quantidade: 1 }],
       endereco: 'Rua X, 1',
       bairro: primeiroBairro || 'X',
@@ -279,6 +413,7 @@ describe('agent.js - calcularPedido', () => {
   test('rejeita pedido sem itens', () => {
     const r = agent.calcularPedido({
       cliente_nome: 'Teste',
+      cliente_telefone: '5519999998888',
       itens: [],
       endereco: 'Rua X, 1',
       bairro: primeiroBairro || 'X',
@@ -295,6 +430,7 @@ describe('agent.js - calcularPedido', () => {
     }
     const r = agent.calcularPedido({
       cliente_nome: 'Teste',
+      cliente_telefone: '5519999998888',
       itens: [{ nome: primeiroItem.nome, quantidade: 0 }],
       endereco: 'Rua X, 1',
       bairro: primeiroBairro || 'X',
@@ -312,6 +448,7 @@ describe('agent.js - calcularPedido', () => {
     const qtd = Math.ceil((CLIENTE.valorMinimoPedido || 0) / primeiroItem.preco) + 1;
     const r = agent.calcularPedido({
       cliente_nome: 'Teste',
+      cliente_telefone: '5519999998888',
       itens: [{ nome: primeiroItem.nome, quantidade: qtd }],
       endereco: 'Rua X, 1',
       bairro: 'Bairro Inexistente Total',
@@ -328,6 +465,7 @@ describe('agent.js - calcularPedido', () => {
     }
     const r = agent.calcularPedido({
       cliente_nome: 'Teste',
+      cliente_telefone: '5519999998888',
       itens: [{ nome: primeiroItem.nome, quantidade: 1 }],
       endereco: 'Rua X, 1',
       bairro: primeiroBairro,

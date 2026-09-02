@@ -33,24 +33,36 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_mensagens_jid ON mensagens(jid);
 
   CREATE TABLE IF NOT EXISTS pedidos (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    jid              TEXT NOT NULL,
-    cliente_nome     TEXT,
-    cliente_telefone TEXT,
-    itens_json       TEXT NOT NULL,     -- JSON: [{nome, quantidade, observacoes, preco_unitario, subtotal}]
-    subtotal         REAL NOT NULL,
-    taxa_entrega     REAL NOT NULL,
-    total            REAL NOT NULL,
-    endereco         TEXT,
-    bairro           TEXT,
-    referencia       TEXT,
-    forma_pagamento  TEXT,
-    troco_para       REAL,              -- so quando pagamento = dinheiro
-    observacoes      TEXT,              -- observacoes gerais do pedido
-    status           TEXT DEFAULT 'aguardando_confirmacao',
-    criado_em        INTEGER NOT NULL
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    jid               TEXT NOT NULL,
+    cliente_nome      TEXT,
+    cliente_telefone  TEXT,
+    itens_json        TEXT NOT NULL,     -- JSON: [{nome, quantidade, observacoes, preco_unitario, subtotal}]
+    subtotal          REAL NOT NULL,
+    taxa_entrega      REAL NOT NULL,
+    total             REAL NOT NULL,
+    endereco          TEXT,
+    bairro            TEXT,
+    referencia        TEXT,
+    forma_pagamento   TEXT,
+    troco_para        REAL,              -- so quando pagamento = dinheiro
+    observacoes       TEXT,              -- observacoes gerais do pedido
+    status            TEXT DEFAULT 'aguardando_confirmacao',
+    criado_em         INTEGER NOT NULL,  -- timestamp ms: quando o pedido foi confirmado
+    previsao_entrega  INTEGER            -- timestamp ms: previsao de entrega (criado_em + tempoMedioEntrega)
   );
   CREATE INDEX IF NOT EXISTS idx_pedidos_jid ON pedidos(jid);
+`);
+
+// Migracao idempotente: adiciona coluna previsao_entrega em bancos que ja existem
+// sem essa coluna. ALTER TABLE ADD COLUMN falha se a coluna ja existe - try/catch trata.
+try {
+  db.exec(`ALTER TABLE pedidos ADD COLUMN previsao_entrega INTEGER`);
+} catch (e) {
+  if (!/duplicate column name/i.test(e?.message || '')) throw e;
+}
+
+db.exec(`
 
   -- Handoff humano: quando cliente pede pra falar com atendente humano OU o
   -- pedido e complexo, o bot pausa aquela conversa por N horas. Enquanto
@@ -112,13 +124,14 @@ export function limparContato(jid) {
 // itens = [{nome, quantidade, observacoes, preco_unitario, subtotal}].
 // Retorna o id do pedido (numero visivel pro dono).
 export function salvarPedido(jid, d) {
+  const agora = Date.now();
   const r = db
     .prepare(
       `INSERT INTO pedidos
          (jid, cliente_nome, cliente_telefone, itens_json, subtotal, taxa_entrega,
           total, endereco, bairro, referencia, forma_pagamento, troco_para,
-          observacoes, status, criado_em)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          observacoes, status, criado_em, previsao_entrega)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       jid,
@@ -135,9 +148,19 @@ export function salvarPedido(jid, d) {
       d.troco_para != null ? Number(d.troco_para) : null,
       d.observacoes || null,
       d.status || 'aguardando_confirmacao',
-      Date.now()
+      agora,
+      d.previsao_entrega != null ? Number(d.previsao_entrega) : null
     );
-  return r.lastInsertRowid;
+  return { id: r.lastInsertRowid, criado_em: agora };
+}
+
+// Retorna o ultimo pedido registrado para este contato (ou null). Usado quando
+// o cliente pergunta "cade meu pedido?" - o bot precisa dos timestamps para
+// responder com data/hora reais, nao chutar.
+export function ultimoPedidoDoContato(jid) {
+  return db
+    .prepare(`SELECT * FROM pedidos WHERE jid = ? ORDER BY id DESC LIMIT 1`)
+    .get(jid);
 }
 
 // Utilitario opcional: listar pedidos (para um futuro painel / relatorio).

@@ -17,6 +17,7 @@ import makeWASocket, {
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
 import { processarMensagem, manutencaoInicial, ehDono } from './core.js';
+import { formatarDataBR } from './agent.js';
 import { CLIENTE } from './config-cliente.js';
 
 if (process.env.MOCK !== 'true' && !process.env.ANTHROPIC_API_KEY) {
@@ -35,6 +36,14 @@ const DONO_NUM = numeroDono();
 const DONO_JID = DONO_NUM ? `${DONO_NUM}@s.whatsapp.net` : null;
 if (!DONO_JID) {
   console.warn('[AVISO] Numero do dono nao configurado. Pedidos so no terminal.\n');
+} else if (DONO_NUM.length < 12 || DONO_NUM.length > 13) {
+  // Brasil: fixo = 12 digitos (55+DDD+8), celular = 13 (55+DDD+9). Qualquer coisa
+  // fora desse intervalo e quase certeza de erro de digitacao - avisa cedo.
+  console.warn(
+    `[AVISO] DONO_WHATSAPP="${DONO_NUM}" tem ${DONO_NUM.length} digitos. ` +
+    `Numero brasileiro tem 12 (fixo) ou 13 (celular). Ex.: 5519999998888. ` +
+    `Pedidos NAO serao entregues se o numero for invalido.\n`
+  );
 }
 
 function extrairTexto(msg) {
@@ -48,13 +57,21 @@ function fmtBRL(v) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function formatarResumoPedido({ id, pedido, telefoneOrigem }) {
+function formatarResumoPedido({ id, pedido, criado_em, telefoneOrigem }) {
+  const tel = pedido.cliente_telefone || telefoneOrigem;
+  const endereco = pedido.endereco
+    ? `${pedido.endereco}${pedido.bairro ? ` - ${pedido.bairro}` : ''}`
+    : (pedido.bairro || '-');
+  const troco = pedido.troco_para ? ` (troco pra ${fmtBRL(pedido.troco_para)})` : '';
+
   const linhas = [
     `🍔 NOVO PEDIDO #${id}`,
-    `Cliente: ${pedido.cliente_nome || '-'}`,
-    `Tel: wa.me/${telefoneOrigem}`,
     '',
-    'Itens:',
+    `Cliente: ${pedido.cliente_nome || '-'}`,
+    `Telefone: ${tel}`,
+    `Endereco: ${endereco}`,
+    '',
+    'Pedido:',
   ];
   for (const it of pedido.itens || []) {
     const obs = it.observacoes ? ` (${it.observacoes})` : '';
@@ -62,15 +79,14 @@ function formatarResumoPedido({ id, pedido, telefoneOrigem }) {
   }
   linhas.push('');
   linhas.push(`Subtotal: ${fmtBRL(pedido.subtotal)}`);
-  linhas.push(`Taxa entrega: ${fmtBRL(pedido.taxa_entrega)}`);
-  linhas.push(`TOTAL: ${fmtBRL(pedido.total)}`);
+  linhas.push(`Taxa de entrega: ${fmtBRL(pedido.taxa_entrega)}`);
+  linhas.push(`TOTAL (com entrega): ${fmtBRL(pedido.total)}`);
   linhas.push('');
-  linhas.push(`Endereco: ${pedido.endereco || '-'}${pedido.bairro ? ` - ${pedido.bairro}` : ''}`);
-  if (pedido.referencia) linhas.push(`Referencia: ${pedido.referencia}`);
-  linhas.push('');
-  const troco = pedido.troco_para ? ` (troco pra ${fmtBRL(pedido.troco_para)})` : '';
   linhas.push(`Pagamento: ${pedido.forma_pagamento || '-'}${troco}`);
-  if (pedido.observacoes) linhas.push(`Obs: ${pedido.observacoes}`);
+  if (pedido.observacoes) linhas.push(`Observacao: ${pedido.observacoes}`);
+  linhas.push('');
+  linhas.push(`Feito em: ${formatarDataBR(criado_em)}`);
+  linhas.push(`Previsao de entrega: ${formatarDataBR(pedido.previsao_entrega)}`);
   return linhas.join('\n');
 }
 
@@ -103,7 +119,27 @@ async function iniciar() {
     if (connection === 'open') {
       console.log('\nConectado! Mande mensagem de OUTRO numero para testar.');
       if (process.env.MOCK === 'true') console.log('(MODO MOCK: sem gastar API.)');
-      if (DONO_JID) console.log(`Notificacoes de pedido vao para: ${DONO_NUM}`);
+      if (DONO_JID) {
+        console.log(`Notificacoes de pedido vao para: ${DONO_NUM}`);
+        // Verifica se o numero do dono esta realmente registrado no WhatsApp.
+        // Se nao estiver, o sendMessage vai falhar silencioso mais tarde - avisamos AGORA.
+        (async () => {
+          try {
+            const [info] = await sock.onWhatsApp(DONO_NUM);
+            if (!info?.exists) {
+              console.warn(
+                `\n[AVISO CRITICO] O numero DONO_WHATSAPP=${DONO_NUM} NAO esta registrado no WhatsApp.\n` +
+                `Os resumos de pedido NAO serao entregues. Verifique se digitou o numero certo,\n` +
+                `se ele tem WhatsApp ativo, e reinicie o bot depois de corrigir o .env.\n`
+              );
+            } else {
+              console.log(`[dono] numero verificado no WhatsApp: OK (jid=${info.jid})`);
+            }
+          } catch (e) {
+            console.warn(`[dono] nao consegui verificar registro do numero: ${e?.message || e}`);
+          }
+        })();
+      }
       console.log('');
     }
     if (connection === 'close') {
@@ -145,6 +181,7 @@ async function iniciar() {
               mensagemDono = formatarResumoPedido({
                 id: info.id,
                 pedido: info.pedido,
+                criado_em: info.criado_em,
                 telefoneOrigem,
               });
             } else if (info.tipo === 'handoff') {
@@ -156,13 +193,28 @@ async function iniciar() {
               return;
             }
 
-            if (DONO_JID) {
-              await sock.sendMessage(DONO_JID, { text: mensagemDono });
-              console.log(`[${info.tipo}] enviado ao dono.`);
-            } else {
-              console.log(`\n===== ${info.tipo.toUpperCase()} (dono nao configurado) =====`);
-              console.log(mensagemDono);
-              console.log('=====================================================\n');
+            // SEMPRE imprime no terminal - garantia de que o dono ve o pedido
+            // (mesmo que o envio no WhatsApp falhe por qualquer motivo).
+            console.log(`\n===== ${info.tipo.toUpperCase()} =====`);
+            console.log(mensagemDono);
+            console.log('=====================================================\n');
+
+            if (!DONO_JID) {
+              console.log('[dono] nao configurado - resumo apenas no terminal.');
+              return;
+            }
+
+            // Tenta enviar pro WhatsApp do dono. Se o Baileys der erro (numero
+            // sem WA ativo, sessao caida, etc), o resumo AINDA foi impresso acima.
+            try {
+              console.log(`[dono] enviando ${info.tipo} para ${DONO_JID}...`);
+              const r = await sock.sendMessage(DONO_JID, { text: mensagemDono });
+              console.log(`[dono] ${info.tipo} enviado. messageId=${r?.key?.id || '?'}`);
+            } catch (e) {
+              console.error(
+                `[dono] FALHA ao enviar ${info.tipo} para ${DONO_JID}: ${e?.message || e}\n` +
+                `       Confirme se o numero tem WhatsApp ativo. Resumo salvo acima no terminal.`
+              );
             }
           },
         });
